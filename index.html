@@ -1,0 +1,877 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
+<title>PULSE Situation Console</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* Layout: ops console. Situation sentence + awareness index first, then a 12-column grid of sensor panels, then the fusion rules. Single dark look carried over from the PULSE design system. */
+:root{
+  --bg:#080810; --s1:#0e0e19; --s2:#161626; --line:#23233b;
+  --fg:#ebebf5; --mut:#9494ae; --dim:#5f5f7b;
+  --acc:#8b7cf8; --acc-soft:rgba(139,124,248,.16);
+  --ok:#2dd4a0; --warn:#f5a623; --crit:#ff5f6d; --trail:#d9dcff;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
+.app{max-width:1440px;margin:0 auto;padding-block:14px 48px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:16px}
+.mono,.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+/* header */
+.top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px 20px;padding-bottom:14px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:12px}
+.mark{width:30px;height:30px;position:relative;flex:none}
+.mark i{position:absolute;inset:0;border:1.5px solid var(--acc);border-radius:50%;opacity:.35}
+.mark i:nth-child(2){inset:7px;opacity:.7}
+.mark i:nth-child(3){inset:12px;background:var(--acc);border:none;opacity:1}
+.brand b{display:block;font-size:17px;letter-spacing:.24em;font-weight:700}
+.brand span{display:block;font-size:11px;color:var(--mut);letter-spacing:.06em}
+.status{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--line);color:var(--mut);white-space:nowrap}
+.pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.pill.ok{color:var(--ok);border-color:rgba(45,212,160,.35)}
+.pill.acc{color:var(--acc);border-color:rgba(139,124,248,.4)}
+.pill.warn{color:var(--warn);border-color:rgba(245,166,35,.4)}
+.pill.crit{color:var(--crit);border-color:rgba(255,95,109,.4)}
+.pill.dim{color:var(--dim)}
+.pill.plain::before{display:none}
+#modePill.ok::before{animation:beat 1.2s ease-in-out infinite}
+@keyframes beat{50%{opacity:.25}}
+.actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{appearance:none;font:inherit;font-size:13px;font-weight:500;color:var(--fg);background:var(--s2);border:1px solid var(--line);border-radius:7px;padding:7px 12px;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--dim)}
+.btn.primary{background:var(--acc);border-color:var(--acc);color:#0b0a1a;font-weight:600}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn:focus-visible,.seg button:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.seg button{appearance:none;font:inherit;font-family:var(--mono);font-size:12px;color:var(--mut);background:transparent;border:0;padding:7px 10px;cursor:pointer}
+.seg button.on{background:var(--acc-soft);color:var(--fg)}
+.notice{border:1px solid rgba(245,166,35,.4);background:rgba(245,166,35,.07);color:var(--fg);border-radius:8px;padding:10px 14px;font-size:13px;max-width:none}
+.notice.crit{border-color:rgba(255,95,109,.45);background:rgba(255,95,109,.07)}
+.notice b{color:var(--warn)}
+.notice.crit b{color:var(--crit)}
+
+/* situation */
+.situation{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px;align-items:center;padding-block:6px}
+.eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);display:flex;gap:10px;align-items:center}
+.eyebrow .num{letter-spacing:0;color:var(--dim)}
+h1{font-size:clamp(22px,3.3vw,38px);font-weight:600;letter-spacing:-.015em;line-height:1.15;margin:6px 0 12px;text-wrap:balance}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font-size:12px;padding:4px 10px;border-radius:6px;background:var(--s2);border:1px solid var(--line);color:var(--fg);white-space:nowrap}
+.chip.ok{border-color:rgba(45,212,160,.35);color:var(--ok)}
+.chip.warn{border-color:rgba(245,166,35,.45);color:var(--warn)}
+.chip.crit{border-color:rgba(255,95,109,.5);color:var(--crit);background:rgba(255,95,109,.08)}
+.chip.dim{color:var(--mut)}
+.index{display:flex;align-items:center;gap:16px}
+.gauge{position:relative;width:128px;height:128px;flex:none}
+.gauge canvas{width:128px;height:128px;display:block}
+.gauge .v{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.gauge .v b{font-family:var(--mono);font-size:32px;font-weight:600;line-height:1}
+.gauge .v span{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut);margin-top:4px}
+.breakdown{display:grid;grid-template-columns:auto auto;gap:3px 14px;font-size:12px}
+.breakdown span{color:var(--mut)}
+.breakdown b{font-family:var(--mono);font-weight:500;text-align:right;font-variant-numeric:tabular-nums}
+
+/* grid */
+.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px}
+.s4{grid-column:span 4}.s5{grid-column:span 5}.s7{grid-column:span 7}.s12{grid-column:span 12}
+.panel{background:var(--s1);border:1px solid var(--line);border-radius:10px;padding:14px 16px 16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.ph{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+.ph h2{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut);font-weight:600;margin:0}
+.ph .src{font-family:var(--mono);font-size:11px;color:var(--dim)}
+.readout{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.big{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:30px;font-weight:600;line-height:1}
+.big small{font-size:13px;color:var(--mut);font-weight:400;margin-left:4px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:10px}
+.stat span{display:block;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim)}
+.stat b{display:block;font-family:var(--mono);font-weight:500;font-size:14px;font-variant-numeric:tabular-nums;margin-top:2px;overflow-wrap:anywhere}
+canvas.spark{width:100%;height:92px;display:block}
+canvas.trail{width:100%;height:340px;display:block;border-radius:6px;background:#0a0a14}
+.cmp-wrap{display:grid;grid-template-columns:minmax(0,1fr);justify-items:center}
+canvas.compass{width:100%;max-width:280px;aspect-ratio:1;display:block}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:11.5px;color:var(--mut)}
+.legend i{display:inline-block;width:16px;height:0;border-top:2px solid var(--trail);vertical-align:middle;margin-right:6px}
+.legend i.dr{border-top:2px dashed var(--acc)}
+.legend i.corr{border-top:2px dotted var(--dim)}
+.legend i.dot{width:9px;height:9px;border-radius:50%;border:2px solid var(--warn)}
+.legend i.x{width:9px;height:9px;border:0;background:var(--crit);transform:rotate(45deg);border-radius:1px}
+.note{font-size:12px;color:var(--mut);margin:0}
+.bars{display:flex;flex-direction:column;gap:6px}
+.bar{display:grid;grid-template-columns:104px minmax(0,1fr) 38px;gap:8px;align-items:center;font-size:12px}
+.bar span{color:var(--mut)}
+.bar .track{height:6px;background:var(--s2);border-radius:3px;overflow:hidden}
+.bar .fill{height:100%;width:0;background:var(--acc);border-radius:3px;transition:width .3s}
+.bar.top .fill{background:var(--ok)}
+.bar.top span{color:var(--fg)}
+.bar b{font-family:var(--mono);font-weight:500;text-align:right;font-variant-numeric:tabular-nums}
+
+/* events */
+.events{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:420px;overflow-y:auto}
+.ev{display:grid;grid-template-columns:52px minmax(0,1fr);gap:10px;padding:8px 10px;border-radius:6px;background:var(--s2);border-left:3px solid var(--dim)}
+.ev.warn{border-left-color:var(--warn)}
+.ev.crit{border-left-color:var(--crit);background:rgba(255,95,109,.08)}
+.ev.info{border-left-color:var(--acc)}
+.ev time{font-family:var(--mono);font-size:12px;color:var(--mut);padding-top:1px}
+.ev b{font-weight:600;font-size:13px}
+.ev p{margin:2px 0 4px;font-size:12px;color:var(--mut)}
+.tags{display:flex;gap:4px;flex-wrap:wrap}
+.tags span{font-family:var(--mono);font-size:10px;color:var(--dim);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.empty{color:var(--dim);font-size:13px;padding:10px 0}
+
+/* matrix */
+.tbl{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:430px}
+th{text-align:left;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);font-weight:600;padding:0 8px 8px 0;border-bottom:1px solid var(--line)}
+td{padding:7px 8px 7px 0;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td .sub{display:block;font-size:11px;color:var(--dim);margin-top:1px}
+td.r{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.native td{color:var(--mut)}
+
+/* rules */
+.rules{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media (max-width:900px){.rules{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:560px){.rules{grid-template-columns:minmax(0,1fr)}}
+.rule{padding:12px 14px;border:1px solid var(--line);border-radius:8px}
+.rule h3{margin:0 0 4px;font-size:13px;font-weight:600}
+.rule p{margin:0;font-size:12px;color:var(--mut)}
+.rule code{font-family:var(--mono);font-size:11.5px;color:var(--acc);background:none}
+footer{font-size:12px;color:var(--dim);display:flex;flex-wrap:wrap;gap:6px 18px}
+
+@media (max-width:1080px){.s4{grid-column:span 6}.s4.wide{grid-column:span 12}.s5,.s7{grid-column:span 12}}
+@media (max-width:700px){
+  .s4,.s5,.s7{grid-column:span 12}
+  .situation{grid-template-columns:minmax(0,1fr)}
+  canvas.trail{height:270px}
+  .actions{width:100%}
+}
+@media (prefers-reduced-motion:reduce){#modePill.ok::before{animation:none}.bar .fill{transition:none}}
+</style>
+
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <div class="mark" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div><b>PULSE</b><span>Situation Console · sensor fusion</span></div>
+    </div>
+    <div class="status">
+      <span id="modePill" class="pill acc">Demo</span>
+      <span id="clock" class="mono" style="color:var(--mut);font-size:12px"></span>
+    </div>
+    <div class="actions">
+      <button id="btnLive" class="btn primary" type="button">Use this phone's sensors</button>
+      <button id="btnDemo" class="btn" type="button">Run demo</button>
+      <div class="seg" id="speedSeg" role="group" aria-label="Playback speed">
+        <button type="button" data-s="1">1×</button><button type="button" data-s="4" class="on">4×</button><button type="button" data-s="10">10×</button>
+      </div>
+      <label class="btn" for="fileIn">Load session</label>
+      <input type="file" id="fileIn" accept=".json,application/json" hidden>
+      <button id="btnExport" class="btn" type="button">Export session</button>
+    </div>
+  </header>
+
+  <div id="notice" class="notice" hidden></div>
+
+  <section class="situation" aria-live="polite">
+    <div style="min-width:0">
+      <div class="eyebrow">Current situation <span class="num" id="tLabel">T+00:00</span></div>
+      <h1 id="sitLine">Waiting for sensor data</h1>
+      <div class="chips" id="sitChips"></div>
+    </div>
+    <div class="index">
+      <div class="gauge"><canvas id="idxCv" width="128" height="128"></canvas><div class="v"><b id="idxVal">0</b><span>Awareness</span></div></div>
+      <div class="breakdown" id="idxBreak"></div>
+    </div>
+  </section>
+
+  <main class="grid">
+    <section class="panel s7">
+      <div class="ph"><h2>Movement trail</h2><span class="src">GPS · steps · compass</span></div>
+      <canvas id="trailCv" class="trail" aria-label="Map of the movement trail"></canvas>
+      <div class="legend"><span><i></i>GPS fix</span><span><i class="dr"></i>Dead reckoning</span><span><i class="corr"></i>Correction</span><span><i class="dot"></i>Metal anomaly</span><span><i class="x"></i>Impact</span></div>
+      <div class="stats">
+        <div class="stat"><span>Distance</span><b id="trDist">0 m</b></div>
+        <div class="stat"><span>GPS fixes</span><b id="trFix">0</b></div>
+        <div class="stat"><span>Dead-reckoned</span><b id="trDr">0 m</b></div>
+        <div class="stat"><span>Position</span><b id="trCoord">—</b></div>
+      </div>
+    </section>
+
+    <section class="panel s5">
+      <div class="ph"><h2>Heading &amp; attitude</h2><span class="src">DeviceOrientation</span></div>
+      <div class="cmp-wrap"><canvas id="cmpCv" class="compass" aria-label="Compass"></canvas></div>
+      <div class="stats">
+        <div class="stat"><span>Heading</span><b id="cmpHead">—</b></div>
+        <div class="stat"><span>Pitch / roll</span><b id="cmpTilt">—</b></div>
+        <div class="stat"><span>vs GPS course</span><b id="cmpDev">—</b></div>
+        <div class="stat"><span>Compass trust</span><b id="cmpAcc">—</b></div>
+      </div>
+    </section>
+
+    <section class="panel s4">
+      <div class="ph"><h2>Magnetic field</h2><span class="src" id="magSrc">Magnetometer |B|</span></div>
+      <div class="readout"><span class="big" id="magVal">—<small>µT</small></span><span id="magState" class="pill dim">No data</span></div>
+      <canvas id="magCv" class="spark" aria-label="Magnetic field over the last 60 seconds"></canvas>
+      <div class="stats">
+        <div class="stat"><span>Baseline</span><b id="magBase">—</b></div>
+        <div class="stat"><span>Peak dev.</span><b id="magPeak">—</b></div>
+        <div class="stat"><span>Anomalies</span><b id="magCount">0</b></div>
+      </div>
+      <p class="note" id="magNote">Field magnitude does not change when the phone rotates, so a jump in |B| means metal or current nearby.</p>
+    </section>
+
+    <section class="panel s4">
+      <div class="ph"><h2>Motion</h2><span class="src">DeviceMotion · 50 Hz</span></div>
+      <div class="readout"><span class="big" id="motLabel" style="font-family:var(--sans);font-size:24px">—</span></div>
+      <canvas id="motCv" class="spark" aria-label="Acceleration over the last 60 seconds"></canvas>
+      <div class="bars" id="motBars"></div>
+      <div class="stats">
+        <div class="stat"><span>Steps</span><b id="motSteps">0</b></div>
+        <div class="stat"><span>Cadence</span><b id="motCad">—</b></div>
+        <div class="stat"><span>Vibration σ</span><b id="motStd">—</b></div>
+      </div>
+    </section>
+
+    <section class="panel s4 wide">
+      <div class="ph"><h2>Acoustic environment</h2><span class="src">Web Audio · uncalibrated</span></div>
+      <div class="readout"><span class="big" id="audVal">—<small>dB</small></span><span id="audClass" class="pill dim">No data</span></div>
+      <canvas id="audCv" class="spark" aria-label="Sound level over the last 60 seconds"></canvas>
+      <div class="stats">
+        <div class="stat"><span>2 s median</span><b id="audMed">—</b></div>
+        <div class="stat"><span>Impulses</span><b id="audImp">0</b></div>
+        <div class="stat"><span>Light</span><b id="luxVal">—</b></div>
+      </div>
+      <p class="note">Only the sound level is measured. No audio is stored or sent anywhere.</p>
+    </section>
+
+    <section class="panel s7">
+      <div class="ph"><h2>Fused events</h2><span class="src" id="evCount">0 events</span></div>
+      <ul class="events" id="evList"><li class="empty">Events appear here as the engine combines sensor readings.</li></ul>
+    </section>
+
+    <section class="panel s5">
+      <div class="ph"><h2>Sensor matrix</h2><span class="src" id="mxSrc">13 sources</span></div>
+      <div class="tbl"><table><thead><tr><th>Sensor</th><th>Reading</th><th>Rate</th><th>Status</th></tr></thead><tbody id="mxBody"></tbody></table></div>
+      <p class="note">Rows marked Native app are not exposed to web pages. The engine already accepts them as sample types, ready for a Swift or Kotlin shell.</p>
+    </section>
+
+    <section class="panel s12">
+      <div class="ph"><h2>Fusion rules</h2><span class="src">how raw readings become events</span></div>
+      <div class="rules">
+        <div class="rule"><h3>Activity</h3><p>Vibration σ over 2 s, step cadence and GPS speed score five states. A new state must hold for <code>1.5 s</code> before it is reported.</p></div>
+        <div class="rule"><h3>Dead reckoning</h3><p>When GPS is older than <code>3 s</code> or worse than <code>±35 m</code>, each step moves the position <code>0.72 m</code> along the compass heading. Drift is reported when GPS returns.</p></div>
+        <div class="rule"><h3>Metal detection</h3><p>|B| is compared with a <code>15 s</code> adaptive baseline. More than <code>12 µT</code> for <code>0.4 s</code> is an anomaly. On iPhone, heading change the gyro cannot explain is used instead.</p></div>
+        <div class="rule"><h3>Compass trust</h3><p>While walking, compass heading is checked against GPS course. A gap above <code>25°</code> lowers heading trust and the awareness index.</p></div>
+        <div class="rule"><h3>Impact and fall</h3><p>Free fall below <code>3 m/s²</code> for <code>0.1 s</code>, then a spike above <code>24 m/s²</code>. After <code>2.5 s</code>, stillness means a possible fall; movement means a stumble.</p></div>
+        <div class="rule"><h3>Covered area</h3><p>Light below <code>400 lux</code> together with weak GPS reads as entering a covered area; above <code>1500 lux</code> reads as open daylight.</p></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>All processing runs on the device. Nothing leaves this page unless you export a session.</span>
+    <span id="footMode"></span>
+  </footer>
+</div>
+
+<script>
+(()=>{
+'use strict';
+const $=id=>document.getElementById(id);
+const DEG=Math.PI/180;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const sig=x=>1/(1+Math.exp(-x));
+const gauss=()=>{let u=0,v=0;while(!u)u=Math.random();while(!v)v=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v)};
+const angDiff=(a,b)=>((a-b+540)%360)-180;
+const CARD=['north','north-east','east','south-east','south','south-west','west','north-west'];
+const CARD_S=['N','NE','E','SE','S','SW','W','NW'];
+const card=(h,s)=>(s?CARD_S:CARD)[Math.round((((h%360)+360)%360)/45)%8];
+const fmtT=t=>{t=Math.max(0,t);return String(Math.floor(t/60)).padStart(2,'0')+':'+String(Math.floor(t%60)).padStart(2,'0')};
+const FIELDS={acc:['m','rr'],ori:['h','p','r','ca'],mag:['b'],gps:['lat','lon','acc','spd','hdg'],aud:['db'],net:['kind','down','rtt','on'],bat:['lvl','chg'],lux:['lux']};
+let FRAMED=false;try{FRAMED=window.self!==window.top}catch(e){FRAMED=true}
+const css=getComputedStyle(document.documentElement);
+const C={};['bg','s1','s2','line','fg','mut','dim','acc','ok','warn','crit','trail'].forEach(k=>C[k]=css.getPropertyValue('--'+k).trim());
+const MONO=css.getPropertyValue('--mono').trim();
+
+/* ---------------- fusion engine ---------------- */
+let MODE='demo',SPEED=4,F,SIM=null,REPLAY=null;
+const STAT={};
+const REC={on:false,samples:[],started:null};
+
+function newFusion(){return{
+  t:0,last:{},counts:{},rate:{},rateT:0,tickT:0,evv:0,
+  acc:{buf:[],lp:null,p1:0,p2:0,lastPeak:-1,steps:0,stepT:[],ffStart:null,ffOk:false,ffT:0,pending:null,std:0},
+  rr:0,
+  ori:{h:null,p:null,r:null,ca:null,prevT:0,proxy:0,lastEmit:-1},
+  mag:{b:null,base:null,dev:0,on:false,onT:0,offT:0,peak:0,count:0,unit:'µT',proxy:false,lt:null,ev:null,startT:0},
+  gps:{fixes:0,lastT:-99,acc:null,speed:null,course:null,prevXY:null,prevT:0,lat:null,lon:null},
+  pos:{x:0,y:0,has:false,lat0:null,lon0:null,trail:[],marks:[],dist:0,dr:false,drDist:0},
+  aud:{db:null,impT:-99,imp:0,med:null},
+  net:null,bat:null,lux:null,envSt:null,envCand:null,envCandT:0,batWarned:false,
+  dev:null,devHi:0,devEvT:-99,
+  act:{label:'Waiting',key:null,conf:{still:0,walking:0,running:0,vehicle:0,handling:0},cand:null,candT:0},
+  ser:{acc:[],mag:[],aud:[]},
+  events:[]
+}}
+F=newFusion();
+
+const LABEL={still:'Stationary',walking:'Walking',running:'Running',vehicle:'In vehicle',handling:'Handling device'};
+const fresh=(k,s=3)=>F.last[k]!=null&&F.t-F.last[k]<s;
+const gpsSpeed=()=>(F.t-F.gps.lastT<4)?F.gps.speed:null;
+const trim=(a,t,w)=>{while(a.length&&a[0][0]<t-w)a.shift()};
+
+function addEvent(sev,title,detail,sensors){
+  const ev={t:F.t,sev,title,detail,sensors:sensors||[]};
+  F.events.unshift(ev);if(F.events.length>80)F.events.pop();F.evv++;return ev;
+}
+function markHere(k){const P=F.pos;if(P.has)P.marks.push({x:P.x,y:P.y,k})}
+function pushTrail(k,t){const P=F.pos;P.trail.push({x:P.x,y:P.y,k,t});if(P.trail.length>6000)P.trail.shift()}
+
+function ingest(s){
+  const t=s.t;F.t=Math.max(F.t,t);F.last[s.type]=t;F.counts[s.type]=(F.counts[s.type]||0)+1;
+  switch(s.type){
+    case 'acc':onAcc(s);break;case 'ori':onOri(s);break;case 'mag':onMag(s);break;case 'gps':onGps(s);break;
+    case 'aud':onAud(s);break;case 'net':onNet(s);break;case 'bat':onBat(s);break;case 'lux':F.lux=s.lux;break;
+  }
+  if(t-F.tickT>=0.25){tick(t);F.tickT=t}
+  if(t-F.rateT>=1){const d=t-F.rateT;for(const k in F.counts)F.rate[k]=F.counts[k]/d;for(const k in F.rate)if(!F.counts[k])F.rate[k]=0;F.counts={};F.rateT=t}
+}
+
+function onAcc(s){
+  const A=F.acc,t=s.t,a=s.m-9.81;F.rr=s.rr||0;
+  A.lp=A.lp==null?a:A.lp+0.35*(a-A.lp);const v=A.lp;
+  if(A.p1>1.0&&A.p1>A.p2&&A.p1>=v&&t-A.lastPeak>0.28){
+    A.lastPeak=t;const sp=gpsSpeed();
+    if(!(sp!=null&&sp>4.5)){A.steps++;A.stepT.push(t);onStep(t)}
+  }
+  A.p2=A.p1;A.p1=v;
+  A.buf.push([t,a]);trim(A.buf,t,2);
+  const ser=F.ser.acc;if(!ser.length||t-ser[ser.length-1][0]>=0.05)ser.push([t,s.m]);trim(ser,t,62);
+  if(s.m<3){if(A.ffStart==null)A.ffStart=t;else if(t-A.ffStart>=0.1){A.ffOk=true;A.ffT=t}}
+  else{
+    A.ffStart=null;
+    if(A.ffOk&&s.m>24&&t-A.ffT<1){A.ffOk=false;A.pending={t,check:t+2.5,peak:s.m};markHere('impact')}
+    else if(A.ffOk&&A.pending)A.pending.peak=Math.max(A.pending.peak,s.m);
+    if(A.ffOk&&t-A.ffT>1)A.ffOk=false;
+  }
+  if(A.pending&&t>=A.pending.check){
+    const recentSteps=A.stepT.filter(x=>x>t-2).length;
+    if(A.std<0.25&&recentSteps<1)addEvent('crit','Possible fall','Free fall, a '+A.pending.peak.toFixed(0)+' m/s² impact, then no movement for 2.5 s',['Accelerometer','Gyro']);
+    else addEvent('warn','Hard impact, movement resumed','Free fall then a '+A.pending.peak.toFixed(0)+' m/s² spike; walking continued',['Accelerometer']);
+    A.pending=null;
+  }
+}
+function onStep(){
+  const P=F.pos;if(!P.has||!P.dr||F.ori.h==null)return;
+  const L=0.72,h=F.ori.h*DEG;P.x+=L*Math.sin(h);P.y+=L*Math.cos(h);P.drDist+=L;P.dist+=L;pushTrail('dr',F.t);
+}
+function onOri(s){
+  const O=F.ori;O.p=s.p;O.r=s.r;O.ca=s.ca;
+  if(s.h==null||isNaN(s.h))return;
+  if(O.h!=null){const dt=s.t-O.prevT;if(dt>0&&dt<1){const rate=Math.abs(angDiff(s.h,O.h))/dt;const resid=Math.max(0,rate-F.rr-4);O.proxy=O.proxy*0.85+resid*0.15}}
+  O.h=s.h;O.prevT=s.t;
+  if(F.mag.proxy)magValue(s.t,O.proxy,20,6);
+}
+function onMag(s){F.mag.proxy=false;F.mag.unit='µT';magValue(s.t,s.b,12,6)}
+function magValue(t,b,thOn,thOff){
+  const M=F.mag;if(M.base==null){M.base=b;M.lt=t}
+  const dt=Math.min(1,Math.max(0,t-M.lt));M.lt=t;M.b=b;M.dev=b-M.base;
+  if(!M.on)M.base+=(b-M.base)*Math.min(1,dt/15);
+  const d=Math.abs(M.dev),u=M.unit,px=M.proxy;
+  if(!M.on){
+    if(d>thOn){if(!M.onT)M.onT=t;else if(t-M.onT>0.4){
+      M.on=true;M.peak=d;M.count++;M.startT=t;markHere('mag');
+      M.ev=px?addEvent('warn','Compass disturbance','Heading moved '+d.toFixed(0)+' °/s without matching rotation, likely metal nearby',['Compass','Gyro'])
+             :addEvent('warn','Magnetic anomaly','+'+d.toFixed(1)+' µT above baseline, ferrous metal or electrical current nearby',['Magnetometer']);
+    }}else M.onT=0;
+  }else{
+    if(d>M.peak){M.peak=d;if(M.ev){M.ev.detail=px?'Heading moved '+d.toFixed(0)+' °/s without matching rotation, likely metal nearby':'+'+d.toFixed(1)+' µT above baseline, ferrous metal or electrical current nearby';F.evv++}}
+    if(d<thOff){if(!M.offT)M.offT=t;else if(t-M.offT>1){M.on=false;M.offT=0;M.onT=0;if(M.ev){M.ev.detail+=' · cleared after '+(t-M.startT).toFixed(0)+' s';F.evv++}}}else M.offT=0;
+  }
+  const ser=F.ser.mag;if(!ser.length||t-ser[ser.length-1][0]>=0.1)ser.push([t,b,M.base]);trim(ser,t,62);
+}
+function onGps(s){
+  const G=F.gps,P=F.pos;
+  if(P.lat0==null){P.lat0=s.lat;P.lon0=s.lon}
+  const x=(s.lon-P.lon0)*Math.cos(P.lat0*DEG)*111320,y=(s.lat-P.lat0)*110540;
+  G.fixes++;G.lat=s.lat;G.lon=s.lon;
+  if(s.spd!=null&&s.spd>=0)G.speed=s.spd;
+  else if(G.prevXY&&s.acc<25){const dt=s.t-G.prevT;if(dt>0.5)G.speed=Math.hypot(x-G.prevXY[0],y-G.prevXY[1])/dt}
+  if(s.hdg!=null&&!isNaN(s.hdg)&&(G.speed||0)>0.8)G.course=s.hdg;
+  else if(G.prevXY&&(G.speed||0)>0.8)G.course=(Math.atan2(x-G.prevXY[0],y-G.prevXY[1])/DEG+360)%360;
+  G.prevXY=[x,y];G.prevT=s.t;G.lastT=s.t;G.acc=s.acc;
+  if(s.acc<=35){
+    if(P.dr){
+      const drift=Math.hypot(P.x-x,P.y-y);P.dr=false;
+      addEvent('info','GPS restored','Dead-reckoned '+P.drDist.toFixed(0)+' m on steps and compass; position corrected by '+drift.toFixed(1)+' m',['GPS','Steps','Compass']);
+      P.x=x;P.y=y;pushTrail('corr',s.t);
+    }else if(!P.has){P.x=x;P.y=y;P.has=true;pushTrail('gps',s.t)}
+    else{
+      const moved=Math.hypot(x-P.x,y-P.y);const th=(G.speed!=null&&G.speed<0.4)?s.acc:Math.max(2,s.acc*0.4);
+      if(moved>th){P.dist+=moved;P.x=x;P.y=y;pushTrail('gps',s.t)}
+    }
+  }
+}
+function onAud(s){
+  const A=F.aud,t=s.t,ser=F.ser.aud;
+  const win=[];for(let i=ser.length-1;i>=0&&ser[i][0]>t-2;i--)win.push(ser[i][1]);
+  if(win.length>4){win.sort((a,b)=>a-b);A.med=win[win.length>>1]}
+  if(A.med!=null&&s.db-A.med>15&&s.db>65&&t-A.impT>1.5){A.impT=t;A.imp++;addEvent('warn','Loud impulse',s.db.toFixed(0)+' dB, '+(s.db-A.med).toFixed(0)+' dB above the surroundings',['Microphone'])}
+  A.db=s.db;if(!ser.length||t-ser[ser.length-1][0]>=0.1)ser.push([t,s.db]);trim(ser,t,62);
+}
+function onNet(s){
+  const p=F.net;
+  if(p){
+    if(p.on&&s.on===false)addEvent('warn','Connection lost','The device reports it is offline',['Network']);
+    else if(p.on===false&&s.on)addEvent('info','Back online','',['Network']);
+    else if(p.type&&s.kind&&p.type!==s.kind)addEvent(s.kind<p.type?'warn':'info','Network '+p.type+' → '+s.kind,(s.down!=null?s.down+' Mbps':'')+(s.rtt!=null?' · '+s.rtt+' ms round trip':''),['Network']);
+  }
+  F.net={type:s.kind,down:s.down,rtt:s.rtt,on:s.on};
+}
+function onBat(s){F.bat={lvl:s.lvl,chg:s.chg};if(s.lvl<0.15&&!s.chg&&!F.batWarned){F.batWarned=true;addEvent('warn','Battery low',Math.round(s.lvl*100)+'%, sensing may stop soon',['Battery'])}}
+
+function tick(t){
+  const dt=Math.min(1,t-(F._tt||t));F._tt=t;
+  const A=F.acc,G=F.gps,P=F.pos,O=F.ori;
+  if(A.buf.length>5){
+    let m=0;for(const b of A.buf)m+=b[1];m/=A.buf.length;let v=0;for(const b of A.buf)v+=(b[1]-m)**2;A.std=Math.sqrt(v/A.buf.length);
+    while(A.stepT.length&&A.stepT[0]<t-3)A.stepT.shift();
+    const cad=A.stepT.length*20,sp=gpsSpeed()||0,std=A.std;
+    const veh=sig((sp-5)/0.8),rest=1-veh,run=sig((cad-140)/8),walk=sig((cad-50)/8);
+    const c={vehicle:veh,running:rest*run,walking:rest*walk*(1-run),still:rest*(1-sig((std-0.2)/0.05))*(1-sig((cad-25)/6)),handling:rest*sig((std-0.2)/0.05)*(1-walk)};
+    let sum=0;for(const k in c)sum+=c[k];for(const k in c)c[k]=sum?c[k]/sum:0;
+    F.act.conf=c;let best='still';for(const k in c)if(c[k]>c[best])best=k;
+    if(best!==F.act.key){
+      if(F.act.cand!==best){F.act.cand=best;F.act.candT=t}
+      else if(t-F.act.candT>=(best==='handling'?3:1.5)||F.act.key==null){
+        const prev=F.act.key;F.act.key=best;F.act.label=LABEL[best];
+        if(prev)addEvent('info',LABEL[prev]+' → '+LABEL[best],'Cadence '+cad+' spm · vibration σ '+std.toFixed(2)+(sp?' · '+sp.toFixed(1)+' m/s':''),['Accelerometer'].concat(sp?['GPS']:[]));
+      }
+    }else F.act.cand=null;
+  }
+  const stale=(t-G.lastT>3)||(G.acc!=null&&G.acc>35);
+  if(stale&&P.has&&!P.dr){P.dr=true;P.drDist=0;addEvent('warn','GPS degraded, dead reckoning','Position now estimated from step count and compass heading',['Steps','Compass'])}
+  if(P.dr&&F.act.key==='vehicle'&&G.speed&&O.h!=null){const d=G.speed*dt;P.x+=d*Math.sin(O.h*DEG);P.y+=d*Math.cos(O.h*DEG);P.drDist+=d;P.dist+=d;pushTrail('dr',t)}
+  if(O.h!=null&&G.course!=null&&t-G.lastT<3&&(G.speed||0)>0.8&&F.act.key==='walking'){
+    const d=angDiff(O.h,G.course);F.dev=F.dev==null?d:F.dev+0.35*angDiff(d,F.dev);
+    if(Math.abs(F.dev)>25){if(!F.devHi)F.devHi=t;else if(t-F.devHi>1&&t-F.devEvT>20){F.devEvT=t;addEvent('warn','Compass disturbed','Heading is '+Math.abs(F.dev).toFixed(0)+'° off the GPS course; heading trust lowered',['Compass','GPS'])}}else F.devHi=0;
+  }else if(t-G.lastT>=3)F.dev=null;
+  if(F.lux!=null&&fresh('lux',6)){
+    const st=F.lux>1500?'out':F.lux<400?'in':null;
+    if(st&&st!==F.envSt){
+      if(F.envCand!==st){F.envCand=st;F.envCandT=t}
+      else if(t-F.envCandT>2){const prev=F.envSt;F.envSt=st;F.envCand=null;
+        const weak=P.dr||(G.acc!=null&&G.acc>20)||t-G.lastT>3;
+        if(prev)addEvent('info',st==='in'?(weak?'Entered a covered area':'Light dropped'):'Back in open daylight',st==='in'?(weak?'Light and GPS dropped together':'Light fell below 400 lux'):'Light above 1500 lux',weak?['Light','GPS']:['Light'])}
+    }
+  }
+}
+
+function awareness(){
+  const P=F.pos,G=F.gps;let pos=0;
+  if(P.dr)pos=Math.max(0.2,0.6-P.drDist/400);else if(fresh('gps',5))pos=G.acc<=10?1:G.acc<=35?0.7:0.35;
+  const head=fresh('ori')&&F.ori.h!=null?((F.mag.on||(F.dev!=null&&Math.abs(F.dev)>25))?0.55:1):0;
+  const parts=[['Position',30,pos],['Heading',15,head],['Motion',20,fresh('acc')?1:0],['Magnetic',10,fresh('mag')?1:(F.mag.proxy&&fresh('ori')?0.5:0)],['Acoustic',15,fresh('aud')?1:0],['Link',10,fresh('net',8)?1:0]];
+  let total=0;for(const p of parts)total+=p[1]*p[2];return{total:Math.round(total),parts};
+}
+
+/* ---------------- record / emit ---------------- */
+function emit(type,d,t){
+  const s=Object.assign({type,t},d);
+  if(REC.on&&REC.samples.length<500000)REC.samples.push([+t.toFixed(3),type].concat(FIELDS[type].map(k=>d[k]==null?null:d[k])));
+  ingest(s);
+}
+
+/* ---------------- demo scenario ---------------- */
+const LAT0=-27.4705,LON0=153.0260;
+const PH=[
+  {end:20,k:'still',spd:0,h0:35,h1:35,cad:0,aud:53,acc:5,lux:9000},
+  {end:70,k:'walk',spd:1.4,h0:40,h1:62,cad:112,aud:61,acc:6,lux:24000},
+  {end:82,k:'still',spd:0,h0:62,h1:62,cad:0,aud:69,acc:7,lux:24000},
+  {end:112,k:'walk',spd:1.35,h0:96,h1:104,cad:108,aud:62,acc:9,lux:3000},
+  {end:126,k:'still',spd:0,h0:104,h1:104,cad:0,aud:58,acc:6,lux:18000},
+  {end:172,k:'bus',spd:8.5,h0:125,h1:178,cad:0,aud:67,acc:8,lux:600},
+  {end:180,k:'still',spd:0,h0:178,h1:178,cad:0,aud:55,acc:5,lux:15000}];
+function phaseAt(t){let s=0;for(const p of PH){if(t<p.end){return Object.assign({},p,{h:p.h0+(p.h1-p.h0)*((t-s)/(p.end-s))})}s=p.end}return Object.assign({},PH[PH.length-1],{h:PH[PH.length-1].h1})}
+function newSim(){return{t:0,x:0,y:0,accum:0,n10:0,n1:0,n2:0}}
+function simAdvance(d){
+  SIM.accum+=d;let n=0;
+  while(SIM.accum>=0.02&&n<600){SIM.accum-=0.02;n++;simStep(0.02);
+    if(SIM.t>=180){F=newFusion();SIM=newSim();addEvent('info','Demo loop restarted','The 3-minute scenario starts again',[]);return}}
+}
+function simStep(dt){
+  const S=SIM;S.t+=dt;const t=S.t,p=phaseAt(t),h=p.h*DEG;
+  S.x+=p.spd*Math.sin(h)*dt;S.y+=p.spd*Math.cos(h)*dt;
+  let m=9.81,rr=1+Math.abs(gauss())*0.5;
+  const stumble=t>=99.8&&t<100.7;
+  if(p.cad>0&&!stumble){m+=2.3*Math.sin(2*Math.PI*(p.cad/60)*t)+gauss()*0.18;rr=18+gauss()*5}
+  else if(p.k==='bus'){m+=gauss()*0.3+0.25*Math.sin(2*Math.PI*2.7*t);rr=4+Math.abs(gauss())*3}
+  else m+=gauss()*0.03;
+  if(t>=100&&t<100.18)m=1.4+gauss()*0.3;else if(t>=100.2&&t<100.26)m=31;else if(stumble)m=9.81+gauss()*0.6;
+  emit('acc',{m,rr},t);
+  if(t>=S.n10){S.n10=t+0.1;
+    const magX=38*Math.exp(-((t-52)**2)/(2*1.6*1.6))+17*Math.exp(-((t-119)**2)/(2*1.2*1.2))+(p.k==='bus'?3+gauss()*1.4:0);
+    emit('mag',{b:47.6+magX+(p.cad>0?1.2*Math.sin(t*0.9):0)+gauss()*0.5},t);
+    emit('ori',{h:(p.h+gauss()*1.8+magX*0.9+720)%360,p:p.k==='walk'?58+3*Math.sin(t*1.7):p.k==='bus'?35+gauss():42+gauss()*0.5,r:gauss()*2+(p.k==='walk'?4*Math.sin(t*1.2):0),ca:10},t);
+    let db=p.aud+gauss()*2.6;if(t>=76&&t<76.4)db=91;if(p.k==='bus'&&Math.random()<0.01)db+=8;
+    emit('aud',{db},t);
+  }
+  if(t>=S.n1){S.n1=t+1;
+    if(!(t>=92&&t<106)){
+      const acc=((t>=88&&t<92)||(t>=106&&t<109))?28:p.acc+Math.abs(gauss());
+      S.ex=(S.ex||0)*0.7+gauss()*acc*0.08;S.ey=(S.ey||0)*0.7+gauss()*acc*0.08;const nx=S.x+S.ex,ny=S.y+S.ey;
+      emit('gps',{lat:LAT0+ny/110540,lon:LON0+nx/(111320*Math.cos(LAT0*DEG)),acc:+acc.toFixed(1),spd:p.spd>0?Math.max(0,p.spd+gauss()*0.15):0,hdg:p.spd>0?p.h:null},t);
+    }
+  }
+  if(t>=S.n2){S.n2=t+2;const under=t>=92&&t<106;
+    emit('net',under?{kind:'3g',down:0.9,rtt:320,on:true}:{kind:'4g',down:+(21+gauss()*2).toFixed(1),rtt:Math.round(55+gauss()*5),on:true},t);
+    emit('bat',{lvl:0.78-t*0.00008,chg:false},t);
+    emit('lux',{lux:Math.round((under?60:p.lux)*(1+gauss()*0.05))},t);
+  }
+}
+
+/* ---------------- replay ---------------- */
+function replayAdvance(d){
+  const R=REPLAY;R.t+=d;
+  while(R.i<R.s.length&&R.s[R.i].t<=R.t)ingest(R.s[R.i++]);
+  if(R.i>=R.s.length){addEvent('info','Replay finished','Recorded session of '+fmtT(R.end)+' fully processed',[]);REPLAY=null;setPill()}
+}
+function loadSession(txt,name){
+  let o;try{o=JSON.parse(txt)}catch(e){notice('crit','That file is not valid JSON. Load a session exported from this console.');return}
+  if(!o||o.v!==1||!Array.isArray(o.samples)){notice('crit','That file is not a PULSE session. Load a .json file exported from this console.');return}
+  const out=[];
+  for(const r of o.samples){
+    if(!Array.isArray(r))continue;const type=r[1],f=FIELDS[type];if(!f)continue;
+    const s={t:Number(r[0]),type};if(!isFinite(s.t))continue;
+    f.forEach((k,i)=>{const v=r[i+2];s[k]=(k==='kind')?(v==null?null:String(v).slice(0,8)):(k==='on'||k==='chg')?!!v:(v==null?null:Number(v))});
+    out.push(s);
+  }
+  if(!out.length){notice('crit','The session file has no readable samples.');return}
+  out.sort((a,b)=>a.t-b.t);const t0=out[0].t;out.forEach(s=>s.t-=t0);
+  stopAll();reset('replay');
+  const types=new Set(out.map(s=>s.type));for(const k in FIELDS)STAT[k]=types.has(k)?'replay':'off';
+  if(!types.has('mag')&&types.has('ori')){F.mag.proxy=true;F.mag.unit='°/s';STAT.mag='proxy'}
+  REPLAY={s:out,i:0,t:0,end:out[out.length-1].t};
+  notice('', 'Replaying <b>'+esc(name||'session')+'</b>: '+out.length.toLocaleString()+' samples over '+fmtT(REPLAY.end)+'. Every event is re-derived from the raw readings.');
+  setPill();
+}
+
+/* ---------------- live sensors ---------------- */
+const LIVE={h:[],geo:null,stream:null,ctx:null,sensors:[],timers:[],t0:0};
+const now=()=>(performance.now()-LIVE.t0)/1000;
+function on(tgt,ev,fn){tgt.addEventListener(ev,fn);LIVE.h.push([tgt,ev,fn])}
+function stopAll(){
+  LIVE.h.forEach(([t,e,f])=>t.removeEventListener(e,f));LIVE.h=[];
+  if(LIVE.geo!=null){try{navigator.geolocation.clearWatch(LIVE.geo)}catch(e){}LIVE.geo=null}
+  if(LIVE.stream){LIVE.stream.getTracks().forEach(t=>t.stop());LIVE.stream=null}
+  if(LIVE.ctx){try{LIVE.ctx.close()}catch(e){}LIVE.ctx=null}
+  LIVE.sensors.forEach(s=>{try{s.stop()}catch(e){}});LIVE.sensors=[];
+  LIVE.timers.forEach(clearInterval);LIVE.timers=[];
+  SIM=null;REPLAY=null;
+}
+function reset(mode){
+  MODE=mode;F=newFusion();REC.on=mode==='live';REC.samples=[];REC.started=new Date();
+  for(const k in FIELDS)STAT[k]=mode==='demo'?'demo':'off';
+}
+function enableProxy(){F.mag.proxy=true;F.mag.unit='°/s';STAT.mag='proxy'}
+
+async function startLive(){
+  let ctx=null;try{const AC=window.AudioContext||window.webkitAudioContext;if(AC)ctx=new AC()}catch(e){}
+  stopAll();reset('live');LIVE.t0=performance.now();LIVE.ctx=ctx;
+  for(const k in FIELDS)STAT[k]='waiting';
+  hideNotice();setPill();
+  if(!window.isSecureContext)notice('crit','<b>Sensors need HTTPS.</b> This page is on an insecure address, so the browser withholds motion, compass, location and microphone. Open the file from an HTTPS address such as GitHub Pages.');
+  try{if(typeof DeviceMotionEvent!=='undefined'&&DeviceMotionEvent.requestPermission){const r=await DeviceMotionEvent.requestPermission();if(r!=='granted')STAT.acc='blocked'}}catch(e){STAT.acc='blocked'}
+  try{if(typeof DeviceOrientationEvent!=='undefined'&&DeviceOrientationEvent.requestPermission){const r=await DeviceOrientationEvent.requestPermission();if(r!=='granted')STAT.ori='blocked'}}catch(e){STAT.ori='blocked'}
+  if(!('DeviceMotionEvent' in window))STAT.acc='unsupported';
+  else if(STAT.acc!=='blocked')on(window,'devicemotion',e=>{
+    const g=e.accelerationIncludingGravity;if(!g||g.x==null)return;
+    const r=e.rotationRate;emit('acc',{m:Math.hypot(g.x,g.y,g.z),rr:r?Math.hypot(r.alpha||0,r.beta||0,r.gamma||0):0},now());
+  });
+  if(!('DeviceOrientationEvent' in window))STAT.ori='unsupported';
+  else if(STAT.ori!=='blocked'){
+    const evName=('ondeviceorientationabsolute' in window)?'deviceorientationabsolute':'deviceorientation';
+    on(window,evName,e=>{
+      const t=now();if(t-F.ori.lastEmit<0.05)return;F.ori.lastEmit=t;
+      let h=null;if(e.webkitCompassHeading!=null)h=e.webkitCompassHeading;else if(e.absolute&&e.alpha!=null)h=(360-e.alpha)%360;
+      emit('ori',{h,p:e.beta,r:e.gamma,ca:e.webkitCompassAccuracy!=null?e.webkitCompassAccuracy:null},t);
+    });
+  }
+  if('geolocation' in navigator){
+    try{LIVE.geo=navigator.geolocation.watchPosition(p=>{const c=p.coords;
+      emit('gps',{lat:c.latitude,lon:c.longitude,acc:c.accuracy,spd:(c.speed!=null&&c.speed>=0)?c.speed:null,hdg:(c.heading!=null&&!isNaN(c.heading)&&c.heading>=0)?c.heading:null},now())},
+      err=>{if(err.code===1){STAT.gps='blocked';addEvent('warn','Location permission denied','Position and dead reckoning are unavailable',['GPS'])}},
+      {enableHighAccuracy:true,maximumAge:0,timeout:20000})}catch(e){STAT.gps='blocked'}
+  }else STAT.gps='unsupported';
+  if('Magnetometer' in window){
+    try{const s=new Magnetometer({frequency:10});
+      s.addEventListener('reading',()=>emit('mag',{b:Math.hypot(s.x,s.y,s.z)},now()));
+      s.addEventListener('error',()=>enableProxy());s.start();LIVE.sensors.push(s)}catch(e){enableProxy()}
+  }else enableProxy();
+  if('AmbientLightSensor' in window){
+    try{const l=new AmbientLightSensor({frequency:2});l.addEventListener('reading',()=>emit('lux',{lux:l.illuminance},now()));l.addEventListener('error',()=>STAT.lux='blocked');l.start();LIVE.sensors.push(l)}catch(e){STAT.lux='blocked'}
+  }else STAT.lux='unsupported';
+  const nc=navigator.connection;
+  const pushNet=()=>emit('net',{kind:nc?nc.effectiveType:null,down:nc?nc.downlink:null,rtt:nc?nc.rtt:null,on:navigator.onLine},now());
+  pushNet();LIVE.timers.push(setInterval(pushNet,5000));on(window,'online',pushNet);on(window,'offline',pushNet);
+  if(navigator.getBattery){
+    navigator.getBattery().then(b=>{const push=()=>emit('bat',{lvl:b.level,chg:b.charging},now());push();b.addEventListener('levelchange',push);b.addEventListener('chargingchange',push);LIVE.timers.push(setInterval(push,30000))}).catch(()=>STAT.bat='blocked');
+  }else STAT.bat='unsupported';
+  if(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia&&ctx){
+    try{
+      const st=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
+      LIVE.stream=st;if(ctx.resume)ctx.resume();
+      const an=ctx.createAnalyser();an.fftSize=2048;ctx.createMediaStreamSource(st).connect(an);
+      const buf=new Float32Array(an.fftSize);
+      LIVE.timers.push(setInterval(()=>{an.getFloatTimeDomainData(buf);let s=0;for(let i=0;i<buf.length;i++)s+=buf[i]*buf[i];
+        emit('aud',{db:clamp(20*Math.log10(Math.sqrt(s/buf.length)+1e-9)+100,20,120)},now())},100));
+    }catch(e){STAT.aud=e&&e.name==='NotAllowedError'?'blocked':'unsupported'}
+  }else STAT.aud='unsupported';
+  addEvent('info','Live sensing started','Recording raw readings on this device; export the session to keep it',[]);
+  setTimeout(()=>{
+    if(MODE!=='live')return;
+    const got=['acc','ori','gps','aud'].filter(k=>F.last[k]!=null).length;
+    if(got===0&&FRAMED)notice('','<b>Phone sensors are switched off inside this viewer.</b> For live readings, open the standalone PULSE file on your phone from an HTTPS address. You can also export a session there and load it here with Load session.');
+    else if(got===0)notice('','<b>No motion, compass, location or sound readings arrived.</b> This device may not have those sensors, or permission was declined. A phone browser over HTTPS gives the full set.');
+  },3500);
+}
+function startDemo(){stopAll();reset('demo');SIM=newSim();hideNotice();if(FRAMED)notice('','This view runs a recorded-style <b>3-minute demo</b> through the real fusion engine. Phone sensors are switched off inside this viewer, so use the standalone file on your phone for live readings.');setPill()}
+
+/* ---------------- UI ---------------- */
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function notice(sev,html){const n=$('notice');n.className='notice'+(sev?' '+sev:'');n.innerHTML=html;n.hidden=false}
+function hideNotice(){$('notice').hidden=true}
+function setPill(){
+  const p=$('modePill');
+  if(MODE==='live'){p.className='pill ok';p.textContent='Live'}
+  else if(MODE==='replay'){p.className='pill warn';p.textContent=REPLAY?'Replay':'Replay done'}
+  else{p.className='pill acc';p.textContent='Demo'}
+  $('footMode').textContent=MODE==='live'?'Live session on this device.':MODE==='replay'?'Replaying a recorded session.':'Demo scenario: a short walk, an underpass, a bus ride.';
+  document.querySelectorAll('#speedSeg button').forEach(b=>b.disabled=MODE==='live');
+}
+
+function fit(cv){
+  const r=cv.getBoundingClientRect(),dpr=Math.min(2,window.devicePixelRatio||1);
+  const w=Math.max(1,Math.round(r.width*dpr)),h=Math.max(1,Math.round(r.height*dpr));
+  if(cv.width!==w||cv.height!==h){cv.width=w;cv.height=h}
+  const c=cv.getContext('2d');c.setTransform(dpr,0,0,dpr,0,0);c.clearRect(0,0,r.width,r.height);return{c,w:r.width,h:r.height};
+}
+function spark(cv,ser,o){
+  const{c,w,h}=fit(cv);const W=60,t1=F.t,t0=t1-W,padR=40,padB=14,pw=w-padR,ph=h-padB-4;
+  const pts=ser.filter(p=>p[0]>=t0);
+  let lo=o.min,hi=o.max;
+  if(pts.length){let a=Infinity,b=-Infinity;for(const p of pts){a=Math.min(a,p[1]);b=Math.max(b,p[1]);if(o.base&&p[2]!=null){a=Math.min(a,p[2]-o.band);b=Math.max(b,p[2]+o.band)}}
+    if(lo==null||a<lo)lo=o.min==null?a:Math.min(o.min,a);if(hi==null||b>hi)hi=o.max==null?b:Math.max(o.max,b)}
+  if(lo==null){lo=0;hi=1}
+  if(hi-lo<o.span){const m=(hi+lo)/2;lo=m-o.span/2;hi=m+o.span/2}
+  const padV=(hi-lo)*0.08;lo-=padV;hi+=padV;
+  const X=t=>(t-t0)/W*pw,Y=v=>4+ph-(v-lo)/(hi-lo)*ph;
+  c.font='10px '+MONO;c.textBaseline='middle';
+  for(let i=0;i<=2;i++){const v=lo+(hi-lo)*(i/2),y=Y(v);c.strokeStyle=C.line;c.lineWidth=1;c.beginPath();c.moveTo(0,y+.5);c.lineTo(pw,y+.5);c.stroke();c.fillStyle=C.dim;c.textAlign='left';c.fillText(v.toFixed(o.dp||0),pw+6,y)}
+  (o.lines||[]).forEach(v=>{if(v>lo&&v<hi){const y=Y(v);c.setLineDash([2,3]);c.strokeStyle=C.dim;c.beginPath();c.moveTo(0,y);c.lineTo(pw,y);c.stroke();c.setLineDash([])}});
+  c.fillStyle=C.dim;c.textBaseline='alphabetic';c.textAlign='left';c.fillText('−60 s',0,h-2);c.textAlign='right';c.fillText('now',pw,h-2);
+  if(!pts.length){c.textAlign='center';c.fillStyle=C.dim;c.fillText('no readings',pw/2,h/2);return}
+  if(o.base){
+    c.fillStyle='rgba(139,124,248,.10)';c.beginPath();
+    pts.forEach((p,i)=>{const x=X(p[0]),y=Y(p[2]+o.band);i?c.lineTo(x,y):c.moveTo(x,y)});
+    for(let i=pts.length-1;i>=0;i--)c.lineTo(X(pts[i][0]),Y(pts[i][2]-o.band));c.closePath();c.fill();
+  }
+  c.beginPath();pts.forEach((p,i)=>{const x=X(p[0]),y=Y(p[1]);i?c.lineTo(x,y):c.moveTo(x,y)});
+  const last=pts[pts.length-1];
+  c.save();c.lineTo(X(last[0]),4+ph);c.lineTo(X(pts[0][0]),4+ph);c.closePath();c.globalAlpha=.14;c.fillStyle=o.color;c.fill();c.restore();
+  c.beginPath();pts.forEach((p,i)=>{const x=X(p[0]),y=Y(p[1]);i?c.lineTo(x,y):c.moveTo(x,y)});
+  c.strokeStyle=o.color;c.lineWidth=1.5;c.lineJoin='round';c.stroke();
+  const ex=X(last[0]),ey=Y(last[1]);c.globalAlpha=.25;c.fillStyle=o.color;c.beginPath();c.arc(ex,ey,6,0,7);c.fill();c.globalAlpha=1;c.beginPath();c.arc(ex,ey,2.8,0,7);c.fill();
+}
+const NICE=[2,5,10,20,50,100,200,500,1000,2000,5000];
+function drawTrail(){
+  const{c,w,h}=fit($('trailCv'));const P=F.pos;
+  c.fillStyle='#0a0a14';c.fillRect(0,0,w,h);
+  if(!P.has){c.fillStyle=C.dim;c.font='13px '+MONO;c.textAlign='center';c.fillText(MODE==='live'?'Waiting for the first position fix':'No position yet',w/2,h/2);return}
+  let x0=P.x,x1=P.x,y0=P.y,y1=P.y;for(const p of P.trail){x0=Math.min(x0,p.x);x1=Math.max(x1,p.x);y0=Math.min(y0,p.y);y1=Math.max(y1,p.y)}
+  let sx=Math.max(40,x1-x0),sy=Math.max(40,y1-y0);const pad=34;
+  const sc=Math.min((w-2*pad)/sx,(h-2*pad)/sy),cx=(x0+x1)/2,cy=(y0+y1)/2;
+  const X=x=>w/2+(x-cx)*sc,Y=y=>h/2-(y-cy)*sc;
+  let step=NICE[NICE.length-1];for(const n of NICE)if(n*sc>=60){step=n;break}
+  c.strokeStyle='rgba(148,148,174,.09)';c.lineWidth=1;
+  const gx0=Math.floor((cx-w/2/sc)/step)*step,gy0=Math.floor((cy-h/2/sc)/step)*step;
+  for(let gx=gx0;X(gx)<w;gx+=step){const x=Math.round(X(gx))+.5;c.beginPath();c.moveTo(x,0);c.lineTo(x,h);c.stroke()}
+  for(let gy=gy0;Y(gy)>0;gy+=step){const y=Math.round(Y(gy))+.5;c.beginPath();c.moveTo(0,y);c.lineTo(w,y);c.stroke()}
+  if(MODE!=='live'||F.gps.acc!=null){const G=F.gps;if(G.acc!=null&&G.prevXY&&F.t-G.lastT<5){c.strokeStyle='rgba(217,220,255,.25)';c.setLineDash([3,4]);c.beginPath();c.arc(X(G.prevXY[0]),Y(G.prevXY[1]),Math.max(3,G.acc*sc),0,7);c.stroke();c.setLineDash([])}}
+  const T=P.trail;c.lineWidth=2;c.lineJoin='round';c.lineCap='round';
+  for(let i=1;i<T.length;i++){const a=T[i-1],b=T[i];
+    if(b.k==='dr'){c.strokeStyle=C.acc;c.setLineDash([5,4])}else if(b.k==='corr'){c.strokeStyle=C.dim;c.setLineDash([1,4])}else{c.strokeStyle=C.trail;c.setLineDash([])}
+    c.beginPath();c.moveTo(X(a.x),Y(a.y));c.lineTo(X(b.x),Y(b.y));c.stroke()}
+  c.setLineDash([]);
+  if(T.length){c.fillStyle=C.mut;c.fillRect(X(T[0].x)-4,Y(T[0].y)-4,8,8)}
+  for(const m of P.marks){const x=X(m.x),y=Y(m.y);
+    if(m.k==='mag'){c.strokeStyle=C.warn;c.lineWidth=2;c.beginPath();c.arc(x,y,7,0,7);c.stroke();c.globalAlpha=.18;c.fillStyle=C.warn;c.beginPath();c.arc(x,y,13,0,7);c.fill();c.globalAlpha=1}
+    else{c.save();c.translate(x,y);c.rotate(Math.PI/4);c.fillStyle=C.crit;c.fillRect(-5,-5,10,10);c.restore()}}
+  const px=X(P.x),py=Y(P.y);
+  if(F.ori.h!=null){const a=F.ori.h*DEG;c.fillStyle='rgba(139,124,248,.28)';c.beginPath();c.moveTo(px,py);c.arc(px,py,34,a-Math.PI/2-0.38,a-Math.PI/2+0.38);c.closePath();c.fill()}
+  c.fillStyle=P.dr?C.acc:C.fg;c.beginPath();c.arc(px,py,5,0,7);c.fill();c.strokeStyle=C.bg;c.lineWidth=2;c.stroke();
+  const bl=step*sc;c.strokeStyle=C.mut;c.lineWidth=1.5;c.beginPath();c.moveTo(14,h-16);c.lineTo(14+bl,h-16);c.moveTo(14,h-20);c.lineTo(14,h-12);c.moveTo(14+bl,h-20);c.lineTo(14+bl,h-12);c.stroke();
+  c.fillStyle=C.mut;c.font='11px '+MONO;c.textAlign='left';c.fillText(step>=1000?(step/1000)+' km':step+' m',20+bl,h-12);
+  c.textAlign='center';c.fillStyle=C.fg;c.font='600 11px '+MONO;c.fillText('N',w-20,22);c.beginPath();c.moveTo(w-20,28);c.lineTo(w-25,40);c.lineTo(w-20,37);c.lineTo(w-15,40);c.closePath();c.fill();
+}
+function drawCompass(){
+  const cv=$('cmpCv');const{c,w,h}=fit(cv);const s=Math.min(w,h),cx=w/2,cy=h/2,R=s/2-16;
+  const hd=F.ori.h;
+  c.strokeStyle=C.line;c.lineWidth=1;c.beginPath();c.arc(cx,cy,R,0,7);c.stroke();
+  c.save();c.translate(cx,cy);c.rotate(-(hd||0)*DEG);
+  for(let d=0;d<360;d+=5){const big=d%30===0,len=big?11:d%10===0?6:3;c.strokeStyle=big?C.mut:C.dim;c.lineWidth=big?1.5:1;c.beginPath();c.moveTo(0,-R);c.lineTo(0,-R+len);c.stroke();c.rotate(5*DEG)}
+  c.textAlign='center';c.textBaseline='middle';
+  [['N',0],['E',90],['S',180],['W',270]].forEach(([l,d])=>{c.save();c.rotate(d*DEG);c.translate(0,-R+25);c.rotate(-d*DEG+(hd||0)*DEG);c.font='600 13px '+MONO;c.fillStyle=l==='N'?C.crit:C.fg;c.fillText(l,0,0);c.restore()});
+  [30,60,120,150,210,240,300,330].forEach(d=>{c.save();c.rotate(d*DEG);c.translate(0,-R+24);c.rotate(-d*DEG+(hd||0)*DEG);c.font='10px '+MONO;c.fillStyle=C.dim;c.fillText(d,0,0);c.restore()});
+  const G=F.gps;
+  if(G.course!=null&&F.t-G.lastT<3&&(G.speed||0)>0.8){c.save();c.rotate(G.course*DEG);c.fillStyle=C.ok;c.beginPath();c.moveTo(0,-R-2);c.lineTo(-6,-R-12);c.lineTo(6,-R-12);c.closePath();c.fill();c.restore()}
+  c.restore();
+  c.fillStyle=hd==null?C.dim:C.acc;c.beginPath();c.moveTo(cx,cy-R+2);c.lineTo(cx-7,cy-R-11);c.lineTo(cx+7,cy-R-11);c.closePath();c.fill();
+  const rb=R*0.36;c.strokeStyle=C.line;c.beginPath();c.arc(cx,cy,rb,0,7);c.stroke();c.beginPath();c.moveTo(cx-rb,cy);c.lineTo(cx+rb,cy);c.moveTo(cx,cy-rb);c.lineTo(cx,cy+rb);c.stroke();
+  if(F.ori.p!=null){const bx=clamp((F.ori.r||0)/45,-1,1)*rb*0.85,by=clamp((F.ori.p||0)/90,-1,1)*rb*0.85;c.fillStyle=F.mag.on?C.warn:C.ok;c.globalAlpha=.85;c.beginPath();c.arc(cx+bx,cy-by,7,0,7);c.fill();c.globalAlpha=1}
+  c.fillStyle=C.fg;c.font='600 22px '+MONO;c.textAlign='center';c.textBaseline='middle';
+  c.fillText(hd==null?'—':String(Math.round(hd)%360).padStart(3,'0')+'°',cx,cy+rb+24);
+}
+function drawGauge(v){
+  const cv=$('idxCv');const{c,w,h}=fit(cv);const cx=w/2,cy=h/2,R=w/2-9,a0=0.75*Math.PI,a1=2.25*Math.PI;
+  c.lineCap='round';c.lineWidth=8;c.strokeStyle=C.s2;c.beginPath();c.arc(cx,cy,R,a0,a1);c.stroke();
+  c.strokeStyle=v>=70?C.ok:v>=40?C.warn:C.crit;if(v>0){c.beginPath();c.arc(cx,cy,R,a0,a0+(a1-a0)*v/100);c.stroke()}
+}
+const BAR_KEYS=['still','walking','running','vehicle','handling'];
+$('motBars').innerHTML=BAR_KEYS.map(k=>'<div class="bar" data-k="'+k+'"><span>'+LABEL[k]+'</span><div class="track"><div class="fill"></div></div><b>0%</b></div>').join('');
+const ROWS=[
+  {k:'gps',n:'GPS',api:'Geolocation API'},{k:'acc',n:'Accelerometer + gyro',api:'DeviceMotion'},{k:'ori',n:'Compass + tilt',api:'DeviceOrientation'},
+  {k:'mag',n:'Magnetometer',api:'Generic Sensor · Android Chrome'},{k:'aud',n:'Microphone level',api:'Web Audio'},{k:'net',n:'Network link',api:'Network Information'},
+  {k:'bat',n:'Battery',api:'Battery Status'},{k:'lux',n:'Ambient light',api:'AmbientLightSensor'},
+  {k:'ble',n:'Bluetooth LE',api:'Nearby devices, beacon range',native:1},{k:'wifi',n:'Wi-Fi scan',api:'Access-point fingerprint for indoor position',native:1},
+  {k:'lidar',n:'LiDAR depth',api:'Obstacle distance, room geometry (ARKit)',native:1},{k:'baro',n:'Barometer',api:'Floor-level change',native:1},{k:'uwb',n:'Ultra-wideband',api:'Centimetre ranging to tags',native:1}];
+const ST_TXT={live:['ok','Live'],demo:['acc','Demo'],replay:['warn','Replay'],proxy:['warn','Proxy'],waiting:['dim','Waiting'],blocked:['crit','Blocked'],unsupported:['dim','Not on this device'],off:['dim','Off'],native:['dim plain','Native app']};
+function reading(k){
+  switch(k){
+    case 'gps':return F.gps.acc!=null?'±'+F.gps.acc.toFixed(0)+' m':'—';
+    case 'acc':return F.ser.acc.length?F.ser.acc[F.ser.acc.length-1][1].toFixed(2)+' m/s²':'—';
+    case 'ori':return F.ori.h!=null?Math.round(F.ori.h)+'° '+card(F.ori.h,1):'—';
+    case 'mag':return F.mag.b!=null?F.mag.b.toFixed(F.mag.proxy?0:1)+' '+F.mag.unit:'—';
+    case 'aud':return F.aud.db!=null?F.aud.db.toFixed(0)+' dB':'—';
+    case 'net':return F.net?(F.net.on===false?'offline':(F.net.type||'online')+(F.net.down!=null?' · '+F.net.down+' Mb/s':'')):'—';
+    case 'bat':return F.bat?Math.round(F.bat.lvl*100)+'%'+(F.bat.chg?' charging':''):'—';
+    case 'lux':return F.lux!=null?Math.round(F.lux).toLocaleString()+' lx':'—';
+  }return '—';
+}
+function status(k){
+  let s=STAT[k]||'off';
+  if(MODE==='live'&&F.last[k]!=null&&fresh(k,k==='net'?8:k==='bat'?40:5))s=(k==='mag'&&F.mag.proxy)?'proxy':'live';
+  if(k==='mag'&&F.mag.proxy&&MODE!=='demo')s=fresh('ori')?'proxy':s;
+  return s;
+}
+let lastEvv=-1,lastMx=0;
+function render(){
+  const t=F.t;
+  $('tLabel').textContent='T+'+fmtT(t);
+  $('clock').textContent=MODE==='live'?new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'}):MODE==='demo'?'scenario '+fmtT(SIM?SIM.t:0)+' / 03:00':REPLAY?fmtT(REPLAY.t)+' / '+fmtT(REPLAY.end):'';
+  const P=F.pos,G=F.gps,O=F.ori,M=F.mag,A=F.aud;
+  // situation line
+  const sp=gpsSpeed(),hd=O.h,key=F.act.key;let line;
+  if(!key)line=(F.last.acc==null&&F.last.gps==null)?'Waiting for sensor data':'Reading the surroundings';
+  else if(key==='still')line='Stationary'+(hd!=null?', facing '+card(hd):'');
+  else if(key==='vehicle')line='In a vehicle heading '+card(G.course!=null?G.course:(hd||0))+(sp!=null?' at '+(sp*3.6).toFixed(0)+' km/h':'');
+  else if(key==='handling')line='Handling the device'+(hd!=null?', facing '+card(hd):'');
+  else line=LABEL[key]+(hd!=null?' '+card(hd):'')+(sp!=null&&sp>0.3?' at '+sp.toFixed(1)+' m/s':'');
+  $('sitLine').textContent=line;
+  const chips=[];
+  if(P.dr)chips.push(['warn','Dead reckoning · '+P.drDist.toFixed(0)+' m on steps']);
+  else if(fresh('gps',5))chips.push([G.acc<=10?'ok':G.acc<=35?'':'warn','GPS ±'+G.acc.toFixed(0)+' m']);
+  else chips.push(['dim','No position fix']);
+  if(A.db!=null&&fresh('aud')){const d=A.db;chips.push([d>75?'warn':'',(d<45?'Quiet':d<60?'Conversation level':d<72?'Busy surroundings':'Loud surroundings')+' · '+d.toFixed(0)+' dB'])}
+  if(F.lux!=null&&fresh('lux',6))chips.push(['',F.lux>1500?'Open daylight':F.lux<400?'Covered or indoors':'Shade or indoor light']);
+  if(M.on)chips.push(['warn',M.proxy?'Compass disturbed':'Metal nearby +'+Math.abs(M.dev).toFixed(0)+' µT']);
+  if(F.net&&F.net.on===false)chips.push(['crit','Offline']);else if(F.net&&F.net.type)chips.push([F.net.type==='4g'?'':'warn','Link '+F.net.type]);
+  if(F.bat)chips.push([F.bat.lvl<0.2&&!F.bat.chg?'warn':'dim','Battery '+Math.round(F.bat.lvl*100)+'%']);
+  const recent=F.events.filter(e=>e.sev!=='info'&&t-e.t<60);
+  if(recent.length)chips.push([recent.some(e=>e.sev==='crit')?'crit':'warn',recent.length+' alert'+(recent.length>1?'s':'')+' in last 60 s']);
+  $('sitChips').innerHTML=chips.map(c=>'<span class="chip '+c[0]+'">'+esc(c[1])+'</span>').join('');
+  const aw=awareness();$('idxVal').textContent=aw.total;drawGauge(aw.total);
+  $('idxBreak').innerHTML=aw.parts.map(p=>'<span>'+p[0]+'</span><b>'+Math.round(p[1]*p[2])+'/'+p[1]+'</b>').join('');
+  // trail
+  drawTrail();
+  $('trDist').textContent=P.dist<1000?P.dist.toFixed(0)+' m':(P.dist/1000).toFixed(2)+' km';
+  $('trFix').textContent=G.fixes;$('trDr').textContent=P.drDist.toFixed(0)+' m';
+  $('trCoord').textContent=G.lat!=null?G.lat.toFixed(5)+', '+G.lon.toFixed(5):'—';
+  // compass
+  drawCompass();
+  $('cmpHead').textContent=hd!=null?Math.round(hd)%360+'° '+card(hd,1):'—';
+  $('cmpTilt').textContent=O.p!=null?Math.round(O.p)+'° / '+Math.round(O.r||0)+'°':'—';
+  $('cmpDev').textContent=F.dev!=null?(F.dev>0?'+':'')+F.dev.toFixed(0)+'°':'—';
+  const trust=hd==null?'—':(M.on||(F.dev!=null&&Math.abs(F.dev)>25))?'Low':(O.ca!=null&&O.ca>25)?'Fair':'Good';
+  $('cmpAcc').textContent=trust+(O.ca!=null&&hd!=null?' · ±'+Math.round(O.ca)+'°':'');
+  // magnetic
+  const u=M.unit;
+  $('magSrc').textContent=M.proxy?'Compass proxy · iPhone':'Magnetometer |B|';
+  $('magVal').innerHTML=(M.b!=null?M.b.toFixed(M.proxy?0:1):'—')+'<small>'+u+'</small>';
+  const ms=$('magState');if(M.b==null){ms.className='pill dim';ms.textContent='No data'}else if(M.on){ms.className='pill warn';ms.textContent='Anomaly'}else{ms.className='pill ok';ms.textContent='Clear'}
+  $('magBase').textContent=M.base!=null?M.base.toFixed(M.proxy?0:1)+' '+u:'—';
+  $('magPeak').textContent=M.b!=null?(M.on?M.peak:Math.abs(M.dev)).toFixed(1)+' '+u:'—';
+  $('magCount').textContent=M.count;
+  $('magNote').textContent=M.proxy?'This browser does not expose the raw field. PULSE watches for heading change that the gyroscope cannot explain, which happens near metal.':'Field magnitude does not change when the phone rotates, so a jump in |B| means metal or current nearby.';
+  spark($('magCv'),F.ser.mag,{color:C.warn,base:true,band:M.proxy?20:12,span:M.proxy?30:20,dp:0});
+  // motion
+  $('motLabel').textContent=F.act.label;
+  spark($('motCv'),F.ser.acc,{color:C.acc,span:4,dp:0,lines:[9.81]});
+  const conf=F.act.conf;document.querySelectorAll('#motBars .bar').forEach(b=>{const k=b.dataset.k,v=conf[k]||0;b.querySelector('.fill').style.width=(v*100).toFixed(0)+'%';b.querySelector('b').textContent=(v*100).toFixed(0)+'%';b.classList.toggle('top',k===key)});
+  $('motSteps').textContent=F.acc.steps.toLocaleString();
+  $('motCad').textContent=F.acc.buf.length>5?(F.acc.stepT.length*20)+' spm':'—';
+  $('motStd').textContent=F.acc.buf.length>5?F.acc.std.toFixed(2)+' m/s²':'—';
+  // audio
+  $('audVal').innerHTML=(A.db!=null?A.db.toFixed(0):'—')+'<small>dB</small>';
+  const ac=$('audClass');if(A.db==null){ac.className='pill dim';ac.textContent='No data'}else{const d=A.db;ac.className='pill '+(d>75?'warn':d<45?'ok':'acc');ac.textContent=d<45?'Quiet':d<60?'Conversation':d<72?'Busy':'Loud'}
+  $('audMed').textContent=A.med!=null?A.med.toFixed(0)+' dB':'—';$('audImp').textContent=A.imp;
+  $('luxVal').textContent=F.lux!=null?Math.round(F.lux).toLocaleString()+' lx':'—';
+  spark($('audCv'),F.ser.aud,{color:C.ok,min:30,max:80,span:20,dp:0,lines:[45,60,72]});
+  // events
+  if(F.evv!==lastEvv){lastEvv=F.evv;const ul=$('evList');
+    $('evCount').textContent=F.events.length+' event'+(F.events.length===1?'':'s');
+    if(!F.events.length)ul.innerHTML='<li class="empty">Events appear here as the engine combines sensor readings.</li>';
+    else ul.innerHTML=F.events.map(e=>'<li class="ev '+e.sev+'"><time>'+fmtT(e.t)+'</time><div><b>'+esc(e.title)+'</b>'+(e.detail?'<p>'+esc(e.detail)+'</p>':'')+(e.sensors.length?'<div class="tags">'+e.sensors.map(s=>'<span>'+esc(s)+'</span>').join('')+'</div>':'')+'</div></li>').join('');
+  }
+  // matrix
+  if(performance.now()-lastMx>500){lastMx=performance.now();
+    const live=ROWS.filter(r=>!r.native&&['live','demo','replay','proxy'].includes(status(r.k))).length;
+    $('mxSrc').textContent=live+' of 13 active';
+    $('mxBody').innerHTML=ROWS.map(r=>{
+      if(r.native)return '<tr class="native"><td>'+r.n+'<span class="sub">'+r.api+'</span></td><td class="r">—</td><td class="r">—</td><td><span class="pill dim plain">Native app</span></td></tr>';
+      const s=status(r.k),st=ST_TXT[s]||ST_TXT.off,hz=F.rate[r.k];
+      return '<tr><td>'+r.n+'<span class="sub">'+r.api+'</span></td><td class="r">'+esc(reading(r.k))+'</td><td class="r">'+(hz?(hz>=1?hz.toFixed(0)+' Hz':(hz*60).toFixed(0)+'/min'):'—')+'</td><td><span class="pill '+st[0]+'">'+st[1]+'</span></td></tr>';
+    }).join('');
+  }
+}
+
+/* ---------------- wiring ---------------- */
+$('btnLive').addEventListener('click',()=>{startLive()});
+$('btnDemo').addEventListener('click',startDemo);
+document.querySelectorAll('#speedSeg button').forEach(b=>b.addEventListener('click',()=>{SPEED=+b.dataset.s;document.querySelectorAll('#speedSeg button').forEach(x=>x.classList.toggle('on',x===b))}));
+$('fileIn').addEventListener('change',e=>{const f=e.target.files&&e.target.files[0];if(!f)return;const r=new FileReader();r.onload=()=>loadSession(r.result,f.name);r.readAsText(f);e.target.value=''});
+if(FRAMED)$('btnExport').hidden=true;
+$('btnExport').addEventListener('click',()=>{
+  if(!REC.samples.length){notice('','Nothing recorded yet. Start live sensing on your phone, move around, then export.');return}
+  const blob=new Blob([JSON.stringify({v:1,app:'PULSE',started:REC.started.toISOString(),device:navigator.userAgent,samples:REC.samples})],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='pulse-session-'+REC.started.toISOString().slice(0,16).replace(/[:T]/g,'-')+'.json';document.body.appendChild(a);a.click();
+  setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000);
+});
+
+let lastFrame=performance.now(),lastRender=0;
+function frame(ts){
+  const dt=Math.min(0.25,Math.max(0,(ts-lastFrame)/1000));lastFrame=ts;
+  if(MODE==='demo'&&SIM)simAdvance(dt*SPEED);
+  else if(MODE==='replay'&&REPLAY)replayAdvance(dt*SPEED);
+  else if(MODE==='live'){const t=now();F.t=Math.max(F.t,t);if(t-F.tickT>=0.25){tick(t);F.tickT=t}}
+  if(ts-lastRender>110){lastRender=ts;try{render()}catch(e){console.error(e)}}
+  requestAnimationFrame(frame);
+}
+startDemo();
+// warm the demo so the first frame already shows a scenario in progress
+for(let i=0;i<55*50;i++)simStep(0.02);
+render();requestAnimationFrame(frame);
+})();
+</script>
+
+</body></html>
